@@ -1,43 +1,56 @@
-import { ExtensionContext, window, workspace, Disposable } from "vscode";
-import { watchFile } from "fs";
+import { ExtensionContext, window, workspace, Disposable, Uri } from "vscode";
+import { promises } from "fs";
 import * as path from "path";
 
 import { getProvider, getChildrenProvider, getTextProvider } from "./providers";
+import { LabelTree } from "./types";
 
 export async function activate(context: ExtensionContext) {
   const { showWarningMessage } = window;
 
   const configFileName = "labelsFinder.json";
-  const configFilePath = path.resolve(
-    `${workspace.rootPath}/${configFileName}`
-  );
-
-  let sourceFile: any;
-  let provider: Disposable;
-  let childrenProvider: Disposable;
-  let textProvider: Disposable;
-  let documentSelector: string | string[];
-  let configFile: { labelsPath: string; documentSelector: string[] };
-
-  try {
-    configFile = await require(configFilePath);
-  } catch {
-    showWarningMessage(
-      `Configuration file "${configFileName}" not found on root of your project.`
-    );
+  const rootPath = workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!rootPath) {
+    showWarningMessage("No workspace folder found.");
     return;
   }
+  const configFilePath = path.join(rootPath as string, configFileName);
 
-  let sourceFilePath = path.resolve(
-    `${workspace.rootPath}/${configFile.labelsPath}`
-  );
+  let sourceFile: LabelTree = {};
+  let provider: Disposable | undefined;
+  let childrenProvider: Disposable | undefined;
+  let textProvider: Disposable | undefined;
+  let documentSelector: string | string[] = [];
+  let configFile: { labelsPath: string; documentSelector: string[] } = { labelsPath: '', documentSelector: [] };
+  let sourceFilePath: string = '';
 
-  try {
-    sourceFile = await require(sourceFilePath);
-  } catch {
-    showWarningMessage('Source file not find on specified "labelsPath".');
-    return;
+  async function loadConfig() {
+    try {
+      const configContent = await promises.readFile(configFilePath, "utf8");
+      configFile = JSON.parse(configContent);
+    } catch {
+      showWarningMessage(
+        `Configuration file "${configFileName}" not found on root of your project.`
+      );
+      return false;
+    }
+    return true;
   }
+
+  async function loadSourceFile() {
+    sourceFilePath = path.join(rootPath as string, configFile.labelsPath);
+    try {
+      const sourceContent = await promises.readFile(sourceFilePath, "utf8");
+      sourceFile = JSON.parse(sourceContent);
+    } catch {
+      showWarningMessage('Source file not found on specified "labelsPath".');
+      return false;
+    }
+    return true;
+  }
+
+  if (!(await loadConfig())) return;
+  if (!(await loadSourceFile())) return;
 
   try {
     documentSelector = configFile.documentSelector;
@@ -49,9 +62,9 @@ export async function activate(context: ExtensionContext) {
   }
 
   const refreshProviders = () => {
-    provider.dispose();
-    childrenProvider.dispose();
-    textProvider.dispose();
+    provider?.dispose();
+    childrenProvider?.dispose();
+    textProvider?.dispose();
 
     provider = getProvider(sourceFile, documentSelector);
     childrenProvider = getChildrenProvider(sourceFile, documentSelector);
@@ -60,34 +73,28 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(provider, childrenProvider, textProvider);
   };
 
-  watchFile(sourceFilePath, async () => {
-    try {
-      delete require.cache[sourceFilePath];
-      sourceFile = await require(sourceFilePath);
-
+  // Watch for changes in the source file
+  const sourceWatcher = workspace.createFileSystemWatcher(
+    sourceFilePath
+  );
+  sourceWatcher.onDidChange(async () => {
+    if (await loadSourceFile()) {
       refreshProviders();
-    } catch {
-      showWarningMessage('Source file not find on specified "labelsPath".');
     }
   });
+  context.subscriptions.push(sourceWatcher);
 
-  watchFile(configFilePath, async () => {
-    try {
-      delete require.cache[configFilePath];
-      delete require.cache[sourceFilePath];
-
-      configFile = await require(configFilePath);
-      sourceFilePath = path.resolve(
-        `${workspace.rootPath}/${configFile.labelsPath}`
-      );
-      sourceFile = await require(sourceFilePath);
+  // Watch for changes in the config file
+  const configWatcher = workspace.createFileSystemWatcher(
+    configFilePath
+  );
+  configWatcher.onDidChange(async () => {
+    if (await loadConfig() && await loadSourceFile()) {
       documentSelector = configFile.documentSelector;
-
       refreshProviders();
-    } catch {
-      showWarningMessage(`Configuration file "${configFileName}" invalid.`);
     }
   });
+  context.subscriptions.push(configWatcher);
 
   provider = getProvider(sourceFile, documentSelector);
   childrenProvider = getChildrenProvider(sourceFile, documentSelector);

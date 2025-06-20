@@ -5,10 +5,11 @@ import {
   Position,
   TextDocument,
 } from "vscode";
+import { LabelTree, LabelTreeNode } from "./types";
 
 const { registerCompletionItemProvider } = languages;
 
-const getProvider = (sourceFile: any, documentSelector: string | string[]) => {
+const getProvider = (sourceFile: LabelTree, documentSelector: string | string[]) => {
   return registerCompletionItemProvider(documentSelector, {
     provideCompletionItems() {
       let completionItems: CompletionItem[] = [];
@@ -25,7 +26,7 @@ const getProvider = (sourceFile: any, documentSelector: string | string[]) => {
 };
 
 const getChildrenProvider = (
-  sourceFile: any,
+  sourceFile: LabelTree,
   documentSelector: string | string[]
 ) => {
   return registerCompletionItemProvider(
@@ -38,7 +39,7 @@ const getChildrenProvider = (
           .lineAt(position)
           .text.substr(0, position.character);
 
-        const searchNode = (currentNode: any, JSONPath: string) => {
+        const searchNode = (currentNode: LabelTree, JSONPath: string) => {
           if (isNodeFound) {
             return;
           }
@@ -63,13 +64,13 @@ const getChildrenProvider = (
             }
           } else if (typeof currentNode === "object") {
             for (let key in currentNode) {
-              searchNode(currentNode[key], `${JSONPath}.${key}`);
+              searchNode((currentNode as LabelTreeNode)[key], `${JSONPath}.${key}`);
             }
           }
         };
 
         for (let key in sourceFile) {
-          searchNode(sourceFile[key], key);
+          searchNode(sourceFile[key] as LabelTree, key);
         }
 
         return isNodeFound ? completionItems : undefined;
@@ -80,17 +81,17 @@ const getChildrenProvider = (
 };
 
 const getTextProvider = (
-  sourceFile: any,
+  sourceFile: LabelTree,
   documentSelector: string | string[]
 ) => {
   return registerCompletionItemProvider(documentSelector, {
     provideCompletionItems() {
       let completionItems: CompletionItem[] = [];
 
-      const searchNode = (currentNode: any, JSONPath: string) => {
+      const searchNode = (currentNode: LabelTree, JSONPath: string) => {
         if (typeof currentNode === "object") {
           for (let key in currentNode) {
-            searchNode(currentNode[key], `${JSONPath}.${key}`);
+            searchNode(currentNode[key] as LabelTree, `${JSONPath}.${key}`);
           }
         } else {
           let completionItem = new CompletionItem(currentNode);
@@ -104,7 +105,7 @@ const getTextProvider = (
       };
 
       for (let key in sourceFile) {
-        searchNode(sourceFile[key], key);
+        searchNode(sourceFile[key] as LabelTree, key);
       }
 
       return [...completionItems];
